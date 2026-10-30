@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>比赛打卡记录 · 我的打卡</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="topbar">
+  <h1>比赛打卡</h1>
+  <span class="who" id="who"></span>
+  <span class="spacer"></span>
+  <button class="ghost small" id="switchUser">换人</button>
+  <button class="ghost small" id="logout">退出</button>
+</div>
+
+<div class="wrap">
+  <div class="card">
+    <h2>今日打卡 <span class="muted" id="todayLabel"></span></h2>
+    <form id="checkinForm">
+      <label>打卡照片 <span class="muted">（首次提交必传，会自动打上日期+姓名水印）</span></label>
+      <input type="file" name="photo" accept="image/*" capture="environment">
+      <img class="preview" id="preview" alt="">
+      <label>今日完成的任务</label>
+      <textarea name="task" placeholder="例如：完成初赛报名资料 3/5、跑通签到流程联调"></textarea>
+      <label>备注（可选）</label>
+      <input type="text" name="note" placeholder="可留空">
+      <div class="row" style="margin-top:16px">
+        <div class="fit"><button type="submit" id="submitBtn">提交今日打卡</button></div>
+        <div class="fit"><span class="muted" id="doneTip"></span></div>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>我的打卡记录</h2>
+    <div class="row" style="margin-bottom:12px">
+      <div><input type="text" id="month" placeholder="按月份筛选，如 2026-10"></div>
+      <div class="fit"><button class="ghost" id="reload">刷新</button></div>
+    </div>
+    <div id="list"><div class="empty">加载中…</div></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<script>
+const toastEl = document.getElementById('toast');
+function toast(m){ toastEl.textContent=m; toastEl.classList.add('show'); clearTimeout(window.__t); window.__t=setTimeout(()=>toastEl.classList.remove('show'),2200); }
+async function api(url, opt){ const r = await fetch(url, Object.assign({credentials:'same-origin'}, opt||{})); if(r.status===401){ location.href='/login'; throw new Error('未登录'); } const j = await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.detail||'请求失败'); return j; }
+
+const photoInput = document.querySelector('input[name=photo]');
+const preview = document.getElementById('preview');
+photoInput.addEventListener('change', () => {
+  const f = photoInput.files[0];
+  if(!f) return;
+  preview.src = URL.createObjectURL(f);
+  preview.style.display = 'block';
+});
+
+document.getElementById('logout').onclick = async () => {
+  // 保留本机记忆：下次进来一键继续
+  await fetch('/api/logout',{method:'POST'});
+  location.href = '/login';
+};
+document.getElementById('switchUser').onclick = async () => {
+  // 换人：连本机记忆一起清掉
+  try { localStorage.removeItem('checkin_name'); localStorage.removeItem('checkin_team'); } catch(_) {}
+  await fetch('/api/logout',{method:'POST'});
+  location.href = '/login?switch=1';
+};
+
+document.getElementById('checkinForm').onsubmit = async e => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  if(!fd.get('photo') || !photoInput.files.length) fd.delete('photo');
+  const btn = document.getElementById('submitBtn');
+  btn.disabled = true; btn.textContent = '提交中…';
+  try {
+    const r = await fetch('/api/checkin', { method:'POST', body: fd, credentials:'same-origin' });
+    const j = await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(j.detail||'提交失败');
+    toast('打卡成功');
+    loadToday(); loadList();
+  } catch(err){ toast(err.message); }
+  btn.disabled = false; btn.textContent = '提交今日打卡';
+};
+
+async function loadMe(){
+  const me = await api('/api/me');
+  document.getElementById('who').textContent = me.name + (me.team ? ' · ' + me.team : '');
+  // 顺手把姓名/队伍记在本机，下次就算 Cookie 过期也能一键继续
+  try { localStorage.setItem('checkin_name', me.name); localStorage.setItem('checkin_team', me.team || ''); } catch(_) {}
+}
+
+async function loadToday(){
+  const d = await api('/api/my/today');
+  const label = document.getElementById('todayLabel');
+  const tip = document.getElementById('doneTip');
+  const now = new Date();
+  label.textContent = now.toLocaleDateString('zh-CN');
+  if(d.done){
+    tip.innerHTML = '<span class="tag ok">今日已打卡</span> 再提交会覆盖当天记录';
+    document.querySelector('textarea[name=task]').value = d.task || '';
+    document.querySelector('input[name=note]').value = d.note || '';
+    if(d.photo_url){ preview.src = d.photo_url; preview.style.display='block'; }
+  } else {
+    tip.innerHTML = '<span class="tag off">今日未打卡</span>';
+  }
+}
+
+async function loadList(){
+  const month = document.getElementById('month').value.trim();
+  const box = document.getElementById('list');
+  const d = await api('/api/my/checkins?month=' + encodeURIComponent(month));
+  if(!d.items.length){ box.innerHTML = '<div class="empty">还没有打卡记录</div>'; return; }
+  box.innerHTML = '<table><thead><tr><th>日期</th><th>照片</th><th>当日任务</th><th>备注</th><th>提交时间</th></tr></thead><tbody>' +
+    d.items.map(it => `<tr>
+      <td>${it.day}</td>
+      <td>${it.photo_url ? `<a href="${it.photo_url}" target="_blank"><img class="thumb" src="${it.photo_url}" alt=""></a>` : '<span class="muted">无</span>'}</td>
+      <td>${escapeHtml(it.task || '')}</td>
+      <td>${escapeHtml(it.note || '')}</td>
+      <td class="muted">${it.updated_at.replace('T',' ')}</td>
+    </tr>`).join('') + '</tbody></table>';
+}
+
+function escapeHtml(s){ return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+document.getElementById('reload').onclick = loadList;
+document.getElementById('month').addEventListener('keydown', e => { if(e.key==='Enter') loadList(); });
+
+loadMe().then(()=>{ loadToday(); loadList(); }).catch(()=>{});
+// 兜底：任何脚本异常都弹出来，避免静默失败
+window.addEventListener('error', function (e) {
+  try { toast('页面出错：' + (e.message || '未知错误')); } catch (_) {}
+});
+window.addEventListener('unhandledrejection', function (e) {
+  try { toast('请求异常：' + ((e.reason && e.reason.message) || e.reason || '未知')); } catch (_) {}
+});
+</script>
+</body>
+</html>

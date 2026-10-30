@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>比赛打卡记录 · 进入</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="brand">
+    <h1>比赛打卡记录</h1>
+    <p>每天一张照片 · 一句完成任务 · 后台自动汇总</p>
+  </div>
+
+  <div class="card hidden" id="quickCard">
+    <h2>欢迎回来</h2>
+    <p class="muted" style="margin-top:-6px">这台设备记着你的名字，点一下就能继续打卡。</p>
+    <div style="margin-top:12px"><button type="button" id="quickEnter" style="width:100%">以「<span id="quickName"></span>」继续打卡</button></div>
+    <div class="switch">不是本人？<a href="#" id="switchUser">换一个名字</a></div>
+  </div>
+
+  <div class="card" id="memberCard">
+    <h2>队员进入</h2>
+    <p class="muted" style="margin-top:-6px">只填姓名就行，第一次填自动建档。</p>
+    <form id="enterForm">
+      <label>姓名</label>
+      <input type="text" name="name" placeholder="例如：张三" maxlength="24" required autofocus>
+      <details style="margin-top:10px">
+        <summary class="muted" style="cursor:pointer">队伍 / 班级（可选）</summary>
+        <input type="text" name="team" placeholder="例如：红队 / 高一(3)班" style="margin-top:8px">
+      </details>
+      <div style="margin-top:16px"><button type="submit" style="width:100%">进入打卡</button></div>
+    </form>
+    <div class="switch">管理员？<a href="#" id="toAdmin">用管理员账号登录</a></div>
+  </div>
+
+  <div class="card hidden" id="adminCard">
+    <h2>管理员登录</h2>
+    <p class="muted" style="margin-top:-6px">队员请回上一页填姓名进入，这里只认管理员账号。</p>
+    <form id="adminForm">
+      <label>账号</label>
+      <input type="text" name="identity" value="admin" required autocomplete="username">
+      <label>密码</label>
+      <input type="password" name="password" placeholder="初始密码 123456" required autocomplete="current-password">
+      <div style="margin-top:16px"><button type="submit" style="width:100%">登录后台</button></div>
+    </form>
+    <div class="switch">队员？<a href="#" id="toMember">回到队员入口</a></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<script>
+const toastEl = document.getElementById('toast');
+function toast(m){ toastEl.textContent=m; toastEl.classList.add('show'); clearTimeout(window.__t); window.__t=setTimeout(()=>toastEl.classList.remove('show'),2400); }
+function postForm(url, data){
+  const fd = new FormData();
+  for(const k in data) fd.append(k, data[k]);
+  return fetch(url, { method:'POST', body:fd, credentials:'same-origin' }).then(async r => {
+    const j = await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(j.detail || '请求失败');
+    return j;
+  });
+}
+
+// ---- 本机记忆（下次不用再输名字）----
+const KEY_NAME = 'checkin_name', KEY_TEAM = 'checkin_team';
+function remembered(){ try { return (localStorage.getItem(KEY_NAME) || '').trim(); } catch(_) { return ''; } }
+function remember(name, team){ try { localStorage.setItem(KEY_NAME, name); localStorage.setItem(KEY_TEAM, team || ''); } catch(_) {} }
+function forget(){ try { localStorage.removeItem(KEY_NAME); localStorage.removeItem(KEY_TEAM); } catch(_) {} }
+
+const quickCard = document.getElementById('quickCard');
+const memberCard = document.getElementById('memberCard');
+const adminCard = document.getElementById('adminCard');
+const enterForm = document.getElementById('enterForm');
+
+async function enterAs(name, team){
+  const r = await postForm('/api/enter', { name: name, team: team || '' });
+  remember(r.name, team);
+  toast(r.created ? '已建档，开始打卡' : '欢迎回来 ' + r.name);
+  location.href = '/';
+}
+
+function showQuick(name){
+  document.getElementById('quickName').textContent = name;
+  quickCard.classList.remove('hidden');
+  memberCard.classList.add('hidden');
+  adminCard.classList.add('hidden');
+}
+
+// 进来先看本机记不记得名字：记住就只给一个「继续打卡」按钮
+(function init(){
+  const switchTo = new URLSearchParams(location.search).get('switch');
+  if(switchTo){
+    forget();
+    enterForm.querySelector('[name=name]').value = '';
+    enterForm.querySelector('[name=team]').value = '';
+    memberCard.classList.remove('hidden');
+    return;
+  }
+  const name = remembered();
+  if(name){
+    showQuick(name);
+    document.getElementById('quickEnter').focus();
+  }
+})();
+
+document.getElementById('quickEnter').onclick = async () => {
+  try { await enterAs(remembered(), localStorage.getItem(KEY_TEAM) || ''); }
+  catch(err){ toast(err.message); }
+};
+document.getElementById('switchUser').onclick = e => {
+  e.preventDefault();
+  forget();
+  quickCard.classList.add('hidden');
+  memberCard.classList.remove('hidden');
+  enterForm.querySelector('[name=name]').value = '';
+  enterForm.querySelector('[name=team]').value = '';
+  enterForm.querySelector('[name=name]').focus();
+};
+document.getElementById('toAdmin').onclick = e => { e.preventDefault(); quickCard.classList.add('hidden'); memberCard.classList.add('hidden'); adminCard.classList.remove('hidden'); };
+document.getElementById('toMember').onclick = e => { e.preventDefault(); adminCard.classList.add('hidden'); if(remembered()) showQuick(remembered()); else memberCard.classList.remove('hidden'); };
+
+enterForm.onsubmit = async e => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const name = (f.get('name') || '').trim();
+  const team = (f.get('team') || '').trim();
+  if(!name) return toast('请填写姓名');
+  try { await enterAs(name, team); }
+  catch(err){
+    // 姓名被停用等异常，别把本机记忆留着反复失败
+    if(/停用/.test(err.message)) forget();
+    toast(err.message);
+  }
+};
+
+document.getElementById('adminForm').onsubmit = async e => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  try {
+    await postForm('/api/login', { identity: f.get('identity'), password: f.get('password') });
+    location.href = '/admin';
+  } catch(err){ toast(err.message); }
+};
+
+window.addEventListener('error', function (e) {
+  try { toast('页面出错：' + (e.message || '未知错误')); } catch (_) {}
+});
+</script>
+</body>
+</html>

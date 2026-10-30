@@ -1,0 +1,23 @@
+@echo off
+rem ===================================================================
+rem  Optional settings for start.bat
+rem  Copy this file to  config.bat  and remove the "rem" you need.
+rem ===================================================================
+
+rem  Service port (default: 8000)
+rem set "PORT=8000"
+
+rem  Listen address:
+rem    0.0.0.0   = accessible from LAN (phones on the same WiFi)
+rem    127.0.0.1 = this PC only
+rem set "HOST=0.0.0.0"
+
+rem  Initial admin password.
+rem  ONLY takes effect when the database has no admin account yet
+rem  (i.e. very first run). After that, change it in the admin UI:
+rem  top-right "账号设置".
+rem set "CHECKIN_ADMIN_PASSWORD=change-this-please"
+
+rem  Set to 1 only when the site is served over HTTPS.
+rem  It makes the login cookie "Secure" (not sent over plain HTTP).
+rem set "CHECKIN_COOKIE_SECURE=1"
